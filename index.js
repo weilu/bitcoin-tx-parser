@@ -3,45 +3,10 @@ var Address = require('bitcoinjs-lib').Address
 var networks = require('bitcoinjs-lib').networks
 var assert = require('assert')
 
-function calculateFee(node) {
+function calculateFeeAndValue(node, addresses, network) {
   var tx = node.tx
 
-  var totalInValue = tx.ins.reduce(function(memo, input) {
-    var buffer = new Buffer(input.hash)
-    Array.prototype.reverse.call(buffer)
-    var inputTxId = buffer.toString('hex')
-
-    var prevNode = node.prevNodes.filter(function(node) {
-      return node.id === inputTxId
-    })[0]
-
-    assert(prevNode != undefined, 'missing node in graph: ' + inputTxId)
-
-    if(!prevNode.tx) return NaN;
-
-    return memo + prevNode.tx.outs[input.index].value
-  }, 0)
-
-  if(isNaN(totalInValue)) return;
-
-  var totalOutValue = tx.outs.reduce(function(memo, output) {
-    return memo + output.value
-  }, 0)
-
-  return totalInValue - totalOutValue
-}
-
-function calculateFeesForPath(node) {
-  if(node.prevNodes.length === 0) return;
-
-  node.tx.fee = calculateFee(node)
-  node.prevNodes.forEach(calculateFeesForPath)
-}
-
-function calculateValue(node, addresses, network) {
-  var tx = node.tx
-
-  var relaventInValue = tx.ins.reduce(function(memo, input) {
+  var inputFeeAndValue = tx.ins.reduce(function(memo, input) {
     var buffer = new Buffer(input.hash)
     Array.prototype.reverse.call(buffer)
     var inputTxId = buffer.toString('hex')
@@ -55,36 +20,44 @@ function calculateValue(node, addresses, network) {
     if(!prevNode.tx) return NaN;
 
     var output = prevNode.tx.outs[input.index]
+    memo.fee = memo.fee + output.value
+
     var toAddress = Address.fromOutputScript(output.script, network).toString()
-
     if(addresses.indexOf(toAddress) >= 0) {
-      return memo + output.value
-    } else {
-      return memo
+      memo.value = memo.value + output.value
     }
-  }, 0)
 
-  if(isNaN(relaventInValue)) return;
+    return memo
+  }, {fee: 0, value: 0})
 
-  var relaventOutValue = tx.outs.reduce(function(memo, output) {
+  if(isNaN(inputFeeAndValue.fee)) return {};
+
+  var outputFeeAndValue = tx.outs.reduce(function(memo, output) {
+    memo.fee = memo.fee + output.value
+
     var toAddress = Address.fromOutputScript(output.script, network).toString()
-
     if(addresses.indexOf(toAddress) >= 0) {
-      return memo + output.value
-    } else {
-      return memo
+      memo.value = memo.value + output.value
     }
-  }, 0)
 
-  return relaventOutValue - relaventInValue
+    return memo
+  }, {fee: 0, value: 0})
+
+  return {
+    fee: inputFeeAndValue.fee - outputFeeAndValue.fee,
+    value: outputFeeAndValue.value - inputFeeAndValue.value
+  }
 }
 
-function calculateValuesForPath(node, addresses, network) {
+function calculateFeesAndValuesForPath(node, addresses, network) {
   if(node.prevNodes.length === 0) return;
 
-  node.tx.value = calculateValue(node, addresses, network)
-  node.prevNodes.forEach(function(node) {
-    calculateValuesForPath(node, addresses, network)
+  var feeAndValue = calculateFeeAndValue(node, addresses, network)
+  node.tx.fee = feeAndValue.fee
+  node.tx.value = feeAndValue.value
+
+  node.prevNodes.forEach(function(n) {
+    calculateFeesAndValuesForPath(n, addresses, network)
   })
 }
 
@@ -102,9 +75,8 @@ function parse(txGraph, addresses, network) {
   }, [])
   assertNoneFundingNodes(tailsNext, addresses, network)
 
-  txGraph.heads.forEach(calculateFeesForPath)
   txGraph.heads.forEach(function(node) {
-    calculateValuesForPath(node, addresses, network)
+    calculateFeesAndValuesForPath(node, addresses, network)
   })
 
   return txGraph
