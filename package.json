@@ -1,0 +1,17 @@
+{
+  "name": "bitcoin-tx-parser",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha test"
+  },
+  "author": "Wei Lu <luwei.here@gmail.com>",
+  "license": "ISC",
+  "dependencies": {
+    "bitcoinjs-lib": "^1.0.2"
+  },
+  "devDependencies": {
+    "bitcoin-tx-graph": "^0.1.0"
+  }
+}
